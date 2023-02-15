@@ -3,6 +3,7 @@
 namespace Laravel\Telescope\Watchers;
 
 use Illuminate\Database\Events\QueryExecuted;
+use Laravel\Telescope\EntryType;
 use Laravel\Telescope\IncomingEntry;
 use Laravel\Telescope\Telescope;
 
@@ -35,18 +36,45 @@ class QueryWatcher extends Watcher
 
         $time = $event->time;
 
-        if ($caller = $this->getCallerFromStackTrace()) {
-            Telescope::recordQuery(IncomingEntry::make([
-                'connection' => $event->connectionName,
-                'bindings' => [],
-                'sql' => $this->replaceBindings($event),
-                'time' => number_format($time, 2, '.', ''),
-                'slow' => isset($this->options['slow']) && $time >= $this->options['slow'],
-                'file' => $caller['file'],
-                'line' => $caller['line'],
-                'hash' => $this->familyHash($event),
-            ])->tags($this->tags($event)));
+        $caller = $this->getCallerFromStackTrace();
+
+        if (!$caller) {
+            return;
         }
+
+        $entry = IncomingEntry::make([
+            'connection' => $event->connectionName,
+            'bindings' => [],
+            'sql' => $this->replaceBindings($event),
+            'time' => number_format($time, 2, '.', ''),
+            'slow' => isset($this->options['slow']) && $time >= $this->options['slow'],
+            'file' => $caller['file'],
+            'line' => $caller['line'],
+            'hash' => $this->familyHash($event),
+            'duplicates' => 0,
+        ])->tags($this->tags($event));
+
+        if($duplicateKey = collect(Telescope::$entriesQueue)
+            ->filter(fn(IncomingEntry $incomingEntry) =>
+                $incomingEntry->type == EntryType::QUERY &&
+                ($incomingEntry->content['hash'] ?? null) == $entry->content['hash']
+            )->keys()->first()
+        ){
+            $duplicateEntry = Telescope::$entriesQueue[$duplicateKey];
+
+            $entry->content['duplicates'] += $duplicateEntry->content['duplicates'] + 1;
+            $entry->content['time'] = number_format(
+                (float) $entry->content['time'] + (float) $duplicateEntry->content['time'],
+                2,
+                '.',
+                ''
+            );
+            $entry->content['slow'] = isset($this->options['slow']) && $entry->content['time'] >= $this->options['slow'];
+
+            unset(Telescope::$entriesQueue[$duplicateKey]);
+        }
+
+        Telescope::recordQuery($entry);
     }
 
     /**

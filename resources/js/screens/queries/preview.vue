@@ -48,6 +48,17 @@
                     </span>
                 </td>
             </tr>
+
+            <tr>
+                <td class="table-fit font-weight-bold">Duplicates</td>
+                <td>
+                    <span class="badge badge-warning font-weight-light" v-if="slotProps.entry.content.duplicates > 0">
+                        {{slotProps.entry.content.duplicates}}
+                    </span>
+
+                    <span v-else>0</span>
+                </td>
+            </tr>
         </template>
 
         <div slot="after-attributes-card" slot-scope="slotProps">
